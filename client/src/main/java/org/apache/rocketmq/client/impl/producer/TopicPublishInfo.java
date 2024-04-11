@@ -26,8 +26,17 @@ import org.apache.rocketmq.remoting.protocol.route.QueueData;
 import org.apache.rocketmq.remoting.protocol.route.TopicRouteData;
 
 public class TopicPublishInfo {
+    /**
+     * 是否顺序消费主题
+     */
     private boolean orderTopic = false;
+    /**
+     * 是否获取到了主题的路由信息
+     */
     private boolean haveTopicRouterInfo = false;
+    /**
+     * 消息队列列表
+     */
     private List<MessageQueue> messageQueueList = new ArrayList<>();
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
     private TopicRouteData topicRouteData;
@@ -76,31 +85,47 @@ public class TopicPublishInfo {
         return selectOneMessageQueue(this.messageQueueList, this.sendWhichQueue, filter);
     }
 
+    /**
+     * 从给定的消息队列列表中选择一个消息队列。
+     * @param messageQueueList 消息队列列表
+     * @param sendQueue 用于选择消息队列的索引
+     * @param filter 队列过滤器
+     * @return 选定的消息队列，如果没有可用的队列则返回null
+     */
     private MessageQueue selectOneMessageQueue(List<MessageQueue> messageQueueList, ThreadLocalIndex sendQueue, QueueFilter ...filter) {
+        // 检查消息队列列表是否为空
         if (messageQueueList == null || messageQueueList.isEmpty()) {
             return null;
         }
 
+        // 如果指定了过滤器
         if (filter != null && filter.length != 0) {
+            // 遍历消息队列列表
             for (int i = 0; i < messageQueueList.size(); i++) {
+                // 计算索引，使用ThreadLocalIndex来确保线程安全地增加索引值
                 int index = Math.abs(sendQueue.incrementAndGet() % messageQueueList.size());
+                // 获取对应索引的消息队列
                 MessageQueue mq = messageQueueList.get(index);
                 boolean filterResult = true;
+                // 应用所有过滤器对消息队列进行过滤
                 for (QueueFilter f: filter) {
                     Preconditions.checkNotNull(f);
                     filterResult &= f.filter(mq);
                 }
+                // 如果通过了所有过滤器，则返回该消息队列
                 if (filterResult) {
                     return mq;
                 }
             }
-
+            // 如果没有通过任何过滤器，则返回null
             return null;
         }
 
+        // 如果没有指定过滤器，直接根据索引选择消息队列
         int index = Math.abs(sendQueue.incrementAndGet() % messageQueueList.size());
         return messageQueueList.get(index);
     }
+
 
     public void resetIndex() {
         this.sendWhichQueue.reset();
