@@ -752,6 +752,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         // 记录发送开始时间，并在重试发送时重置消息的主题
                         beginTimestampPrev = System.currentTimeMillis();
                         if (times > 0) {
+                            //Reset topic with namespace during resend.
                             msg.setTopic(this.defaultMQProducer.withNamespace(msg.getTopic()));
                         }
 
@@ -781,18 +782,58 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                                         continue;
                                     }
                                 }
-                                return sendResult; // 返回发送结果
+
+                                return sendResult;
                             default:
                                 break;
                         }
                     } catch (MQClientException e) {
-                        // 异常处理
+                        endTimestamp = System.currentTimeMillis();
+                        this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false, true);
+                        log.warn("sendKernelImpl exception, resend at once, InvokeID: %s, RT: %sms, Broker: %s", invokeID, endTimestamp - beginTimestampPrev, mq, e);
+                        log.warn(msg.toString());
+                        exception = e;
+                        continue;
                     } catch (RemotingException e) {
-                        // 异常处理
+                        endTimestamp = System.currentTimeMillis();
+                        if (this.mqFaultStrategy.isStartDetectorEnable()) {
+                            // Set this broker unreachable when detecting schedule task is running for RemotingException.
+                            this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, true, false);
+                        } else {
+                            // Otherwise, isolate this broker.
+                            this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, true, true);
+                        }
+                        log.warn("sendKernelImpl exception, resend at once, InvokeID: %s, RT: %sms, Broker: %s", invokeID, endTimestamp - beginTimestampPrev, mq, e);
+                        if (log.isDebugEnabled()) {
+                            log.debug(msg.toString());
+                        }
+                        exception = e;
+                        continue;
                     } catch (MQBrokerException e) {
-                        // 异常处理
+                        endTimestamp = System.currentTimeMillis();
+                        this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, true, false);
+                        log.warn("sendKernelImpl exception, resend at once, InvokeID: %s, RT: %sms, Broker: %s", invokeID, endTimestamp - beginTimestampPrev, mq, e);
+                        if (log.isDebugEnabled()) {
+                            log.debug(msg.toString());
+                        }
+                        exception = e;
+                        if (this.defaultMQProducer.getRetryResponseCodes().contains(e.getResponseCode())) {
+                            continue;
+                        } else {
+                            if (sendResult != null) {
+                                return sendResult;
+                            }
+
+                            throw e;
+                        }
                     } catch (InterruptedException e) {
-                        // 异常处理
+                        endTimestamp = System.currentTimeMillis();
+                        this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false, true);
+                        log.warn("sendKernelImpl exception, throw exception, InvokeID: %s, RT: %sms, Broker: %s", invokeID, endTimestamp - beginTimestampPrev, mq, e);
+                        if (log.isDebugEnabled()) {
+                            log.debug(msg.toString());
+                        }
+                        throw e;
                     }
                 } else {
                     break; // 如果没有选择到消息队列，则跳出循环
@@ -806,10 +847,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
             // 构造发送失败信息
             String info = String.format("Send [%d] times, still failed, cost [%d]ms, Topic: %s, BrokersSent: %s",
-                    times,
-                    System.currentTimeMillis() - beginTimestampFirst,
-                    msg.getTopic(),
-                    Arrays.toString(brokersSent));
+                times,
+                System.currentTimeMillis() - beginTimestampFirst,
+                msg.getTopic(),
+                Arrays.toString(brokersSent));
 
             // 添加推荐操作的链接
             info += FAQUrl.suggestTodo(FAQUrl.SEND_MSG_FAILED);
@@ -839,7 +880,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // 如果找不到主题的路由信息，则抛出主题路由信息不存在的异常
         throw new MQClientException("No route info of this topic: " + msg.getTopic() + FAQUrl.suggestTodo(FAQUrl.NO_TOPIC_ROUTE_INFO),
-                null).setResponseCode(ClientErrorCode.NOT_FOUND_TOPIC_EXCEPTION);
+            null).setResponseCode(ClientErrorCode.NOT_FOUND_TOPIC_EXCEPTION);
     }
 
     /**
@@ -918,7 +959,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             // 备份消息体
             byte[] prevBody = msg.getBody();
             try {
-                // 如果消息不是批量消息，则设置消息 ID
+                //for MessageBatch,ID has been set in the generating process
                 if (!(msg instanceof MessageBatch)) {
                     MessageClientIDSetter.setUniqID(msg);
                 }
@@ -949,12 +990,35 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 执行禁止发送消息的钩子
                 if (hasCheckForbiddenHook()) {
                     CheckForbiddenContext checkForbiddenContext = new CheckForbiddenContext();
+                    checkForbiddenContext.setNameSrvAddr(this.defaultMQProducer.getNamesrvAddr());
+                    checkForbiddenContext.setGroup(this.defaultMQProducer.getProducerGroup());
+                    checkForbiddenContext.setCommunicationMode(communicationMode);
+                    checkForbiddenContext.setBrokerAddr(brokerAddr);
+                    checkForbiddenContext.setMessage(msg);
+                    checkForbiddenContext.setMq(mq);
+                    checkForbiddenContext.setUnitMode(this.isUnitMode());
                     this.executeCheckForbiddenHook(checkForbiddenContext);
                 }
 
                 // 执行发送消息之前的钩子
                 if (this.hasSendMessageHook()) {
                     context = new SendMessageContext();
+                    context.setProducer(this);
+                    context.setProducerGroup(this.defaultMQProducer.getProducerGroup());
+                    context.setCommunicationMode(communicationMode);
+                    context.setBornHost(this.defaultMQProducer.getClientIP());
+                    context.setBrokerAddr(brokerAddr);
+                    context.setMessage(msg);
+                    context.setMq(mq);
+                    context.setNamespace(this.defaultMQProducer.getNamespace());
+                    String isTrans = msg.getProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED);
+                    if (isTrans != null && isTrans.equals("true")) {
+                        context.setMsgType(MessageType.Trans_Msg_Half);
+                    }
+
+                    if (msg.getProperty("__STARTDELIVERTIME") != null || msg.getProperty(MessageConst.PROPERTY_DELAY_TIME_LEVEL) != null) {
+                        context.setMsgType(MessageType.Delay_Msg);
+                    }
                     this.executeSendMessageHookBefore(context);
                 }
 
@@ -1016,18 +1080,18 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             throw new RemotingTooMuchRequestException("sendKernelImpl call timeout");
                         }
                         sendResult = this.mQClientFactory.getMQClientAPIImpl().sendMessage(
-                                brokerAddr,
-                                brokerName,
-                                tmpMessage,
-                                requestHeader,
-                                timeout - costTimeAsync,
-                                communicationMode,
-                                sendCallback,
-                                topicPublishInfo,
-                                this.mQClientFactory,
-                                this.defaultMQProducer.getRetryTimesWhenSendAsyncFailed(),
-                                context,
-                                this);
+                            brokerAddr,
+                            brokerName,
+                            tmpMessage,
+                            requestHeader,
+                            timeout - costTimeAsync,
+                            communicationMode,
+                            sendCallback,
+                            topicPublishInfo,
+                            this.mQClientFactory,
+                            this.defaultMQProducer.getRetryTimesWhenSendAsyncFailed(),
+                            context,
+                            this);
                         break;
                     case ONEWAY:
                     case SYNC:
@@ -1036,14 +1100,14 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             throw new RemotingTooMuchRequestException("sendKernelImpl call timeout");
                         }
                         sendResult = this.mQClientFactory.getMQClientAPIImpl().sendMessage(
-                                brokerAddr,
-                                brokerName,
-                                msg,
-                                requestHeader,
-                                timeout - costTimeSync,
-                                communicationMode,
-                                context,
-                                this);
+                            brokerAddr,
+                            brokerName,
+                            msg,
+                            requestHeader,
+                            timeout - costTimeSync,
+                            communicationMode,
+                            context,
+                            this);
                         break;
                     default:
                         assert false;
