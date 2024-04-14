@@ -38,7 +38,14 @@ public class TopicPublishInfo {
      * 消息队列列表
      */
     private List<MessageQueue> messageQueueList = new ArrayList<>();
+    /**
+     * 每选择一次消息队列，该值会自增1，如果超过
+     * Integer.MAX_VALUE，则重置为0，用于选择消息队列
+     */
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
+    /**
+     * topic路由信息
+     */
     private TopicRouteData topicRouteData;
 
     public interface QueueFilter {

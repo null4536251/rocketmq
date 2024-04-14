@@ -885,6 +885,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     /**
      * 获取topic路由信息
+     * 从缓存中获取topic路由信息，获取到有效路由直接返回，如果没获取到或者获取到的路由信息不可用，则向nameserver查询该topic的路由信息
      * @param topic
      * @return
      */
@@ -905,8 +906,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
-            // 如果以上条件都不满足，说明需要更新主题的路由信息
-            // 此时调用mQClientFactory.updateTopicRouteInfoFromNameServer方法，指示需要强制更新主题的路由信息
+            // 尝试用默认主题查询（topic = TBW102）
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             // 再次尝试从topicPublishInfoTable中获取指定主题的发布信息，并返回获取到的发布信息
             topicPublishInfo = this.topicPublishInfoTable.get(topic);

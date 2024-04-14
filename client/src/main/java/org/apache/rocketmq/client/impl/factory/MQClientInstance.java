@@ -776,6 +776,7 @@ public class MQClientInstance {
                         // 更新默认主题的读写队列数量
                         if (topicRouteData != null) {
                             for (QueueData data : topicRouteData.getQueueDatas()) {
+                                // defaultMQProducer.getDefaultTopicQueueNums()= 4
                                 int queueNums = Math.min(defaultMQProducer.getDefaultTopicQueueNums(), data.getReadQueueNums());
                                 data.setReadQueueNums(queueNums);
                                 data.setWriteQueueNums(queueNums);
@@ -792,6 +793,7 @@ public class MQClientInstance {
                         // 判断新的主题路由信息是否与旧的不同
                         boolean changed = topicRouteData.topicRouteDataChanged(old);
                         // 如果路由信息发生了变化，或者需要更新主题路由信息
+                        ///todo-tzx 22480 2024/4/14 19:19  当前只阅读了发送消息时查找topic路由信息的代码？而这个过程是缓存中不存在才会走到这里，所以这里一定是不同的，为什么还需要比较？或许是其他引用该方法的场景需要进行对比吗？
                         if (!changed) {
                             changed = this.isNeedUpdateTopicRouteInfo(topic);
                         } else {
