@@ -782,16 +782,19 @@ public class DefaultMessageStore implements MessageStore {
     @Override
     public GetMessageResult getMessage(final String group, final String topic, final int queueId, final long offset,
         final int maxMsgNums, final int maxTotalMsgSize, final MessageFilter messageFilter) {
+        // 消息存储已经关闭
         if (this.shutdown) {
             LOGGER.warn("message store has shutdown, so getMessage is forbidden");
             return null;
         }
 
+        // 消息存储不可用
         if (!this.runningFlags.isReadable()) {
             LOGGER.warn("message store is not readable, so getMessage is forbidden " + this.runningFlags.getFlagBits());
             return null;
         }
 
+        // 获取主题配置信息
         Optional<TopicConfig> topicConfig = getTopicConfig(topic);
         CleanupPolicy policy = CleanupPolicyUtils.getDeletePolicy(topicConfig);
         //check request topic flag
@@ -816,16 +819,27 @@ public class DefaultMessageStore implements MessageStore {
             maxOffset = consumeQueue.getMaxOffsetInQueue();
 
             if (maxOffset == 0) {
+                // 当前消费队列中没消息
                 status = GetMessageStatus.NO_MESSAGE_IN_QUEUE;
                 nextBeginOffset = nextOffsetCorrection(offset, 0);
             } else if (offset < minOffset) {
+                // 待拉取消息偏移量小于队列起始偏移量
                 status = GetMessageStatus.OFFSET_TOO_SMALL;
+                // 如果当前Broker为主节点，下次拉取偏移量为队列的最小偏移量。
+                // 如果当前Broker为从节点并且offsetCheckInSlave为true，下次拉取偏移量为队列的最小偏移量。
+                // 其他情况下次拉取时使用原偏移量。
                 nextBeginOffset = nextOffsetCorrection(offset, minOffset);
             } else if (offset == maxOffset) {
+                // 待拉取消息偏移量等于队列最大偏移量
                 status = GetMessageStatus.OFFSET_OVERFLOW_ONE;
+                // 下次拉取偏移量依然为offset
                 nextBeginOffset = nextOffsetCorrection(offset, offset);
             } else if (offset > maxOffset) {
+                // 偏移量越界
                 status = GetMessageStatus.OFFSET_OVERFLOW_BADLY;
+                // 时需要考虑当前队列的偏移量是否为0
+                // 如果当前队列的最小偏移量为0，则使用最小偏移量纠正下次拉取偏移量
+                // 如果当前队列的最小偏移量不为0
                 nextBeginOffset = nextOffsetCorrection(offset, maxOffset);
             } else {
                 final int maxFilterMessageSize = Math.max(this.messageStoreConfig.getMaxFilterMessageSize(), maxMsgNums * consumeQueue.getUnitSize());

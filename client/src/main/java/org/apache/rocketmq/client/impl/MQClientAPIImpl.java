@@ -548,6 +548,25 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
         return sendMessage(addr, brokerName, msg, requestHeader, timeoutMillis, communicationMode, null, null, null, 0, context, producer);
     }
 
+    /**
+     *
+     * @param addr 目的broker地址
+     * @param brokerName 目标broker名称
+     * @param msg 消息体
+     * @param requestHeader 消息请求头
+     * @param timeoutMillis 超时时间
+     * @param communicationMode 通信方式（同步、异步、单向）
+     * @param sendCallback 回调函数
+     * @param topicPublishInfo topic发布信息（包含路由等信息）
+     * @param instance MqClientInstance实例
+     * @param retryTimesWhenSendFailed 重试次数
+     * @param context 上下文
+     * @param producer 默认的MQProducerImpl实现
+     * @return
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     public SendResult sendMessage(
         final String addr,
         final String brokerName,
@@ -564,7 +583,9 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
     ) throws RemotingException, MQBrokerException, InterruptedException {
         long beginStartTime = System.currentTimeMillis();
         RemotingCommand request = null;
+        // 获取消息类型
         String msgType = msg.getProperty(MessageConst.PROPERTY_MESSAGE_TYPE);
+        // 判断是否为回复消息
         boolean isReply = msgType != null && msgType.equals(MixAll.REPLY_MESSAGE_FLAG);
         if (isReply) {
             if (sendSmartMsg) {
@@ -586,6 +607,7 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
         switch (communicationMode) {
             case ONEWAY:
                 this.remotingClient.invokeOneway(addr, request, timeoutMillis);
+                // 单向消息，不考虑结果，不需要等待响应
                 return null;
             case ASYNC:
                 final AtomicInteger times = new AtomicInteger();
@@ -593,6 +615,7 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
                 if (timeoutMillis < costTimeAsync) {
                     throw new RemotingTooMuchRequestException("sendMessage call timeout");
                 }
+                // 发送异步消息，设置回调函数
                 this.sendMessageAsync(addr, brokerName, msg, timeoutMillis - costTimeAsync, request, sendCallback, topicPublishInfo, instance,
                     retryTimesWhenSendFailed, times, context, producer);
                 return null;
@@ -603,6 +626,7 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
                 }
                 return this.sendMessageSync(addr, brokerName, msg, timeoutMillis - costTimeSync, request);
             default:
+                // 程序不应该执行到这里，会抛出AssertionError异常
                 assert false;
                 break;
         }

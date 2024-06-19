@@ -105,7 +105,6 @@ public class TopicPublishInfo {
             return null;
         }
 
-        // 如果指定了过滤器
         if (filter != null && filter.length != 0) {
             // 遍历消息队列列表
             for (int i = 0; i < messageQueueList.size(); i++) {
@@ -139,13 +138,18 @@ public class TopicPublishInfo {
     }
 
     public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
+        // 首次选择消息队列的时候，传入的lastBrokerName为null
         if (lastBrokerName == null) {
             return selectOneMessageQueue();
         } else {
-            for (int i = 0; i < this.messageQueueList.size(); i++) {
+            // 这里改成增强版的for循环可读性会更高一些
+            // for (MessageQueue messageQueue : this.messageQueueList)
+            for (MessageQueue messageQueue : this.messageQueueList) {
+                // 序列自增后返回
                 int index = this.sendWhichQueue.incrementAndGet();
                 int pos = index % this.messageQueueList.size();
                 MessageQueue mq = this.messageQueueList.get(pos);
+                // 规避可能存在问题的broker
                 if (!mq.getBrokerName().equals(lastBrokerName)) {
                     return mq;
                 }

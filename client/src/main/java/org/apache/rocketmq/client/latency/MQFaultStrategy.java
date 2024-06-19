@@ -36,6 +36,11 @@ public class MQFaultStrategy {
             this.lastBrokerName = lastBrokerName;
         }
 
+        /**
+         * 实现QueueFilter接口，可以判断传入消息队列是否所属上次发送失败的broker
+         * @param mq
+         * @return
+         */
         @Override public boolean filter(MessageQueue mq) {
             if (lastBrokerName != null) {
                 return !mq.getBrokerName().equals(lastBrokerName);
@@ -141,11 +146,12 @@ public class MQFaultStrategy {
             if (resetIndex) {
                 tpInfo.resetIndex();
             }
+            // 先尝试选择一个可用的消息队列
             MessageQueue mq = tpInfo.selectOneMessageQueue(availableFilter, brokerFilter);
             if (mq != null) {
                 return mq;
             }
-
+            // 没有获取可用的消息队列，则尝试选择一个可达的消息队列
             mq = tpInfo.selectOneMessageQueue(reachableFilter, brokerFilter);
             if (mq != null) {
                 return mq;

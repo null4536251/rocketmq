@@ -177,47 +177,75 @@ public class PullAPIWrapper {
         }
     }
 
+
+
+    /**
+     * 执行消息拉取的核心方法。
+     *
+     * @param mq                    消息队列
+     * @param subExpression         订阅表达式
+     * @param expressionType        订阅表达式类型
+     * @param subVersion            订阅版本
+     * @param offset                拉取偏移量
+     * @param maxNums               最大消息数
+     * @param maxSizeInBytes        最大消息大小（字节）
+     * @param sysFlag               系统标志
+     * @param commitOffset          提交偏移量
+     * @param brokerSuspendMaxTimeMillis    Broker挂起最大时间（毫秒）
+     * @param timeoutMillis         超时时间（毫秒）
+     * @param communicationMode     通信模式
+     * @param pullCallback          拉取回调函数
+     * @return                      拉取结果
+     * @throws MQClientException    客户端异常
+     * @throws RemotingException   远程调用异常
+     * @throws MQBrokerException   MQ Broker异常
+     * @throws InterruptedException    中断异常
+     */
     public PullResult pullKernelImpl(
-        final MessageQueue mq,
-        final String subExpression,
-        final String expressionType,
-        final long subVersion,
-        final long offset,
-        final int maxNums,
-        final int maxSizeInBytes,
-        final int sysFlag,
-        final long commitOffset,
-        final long brokerSuspendMaxTimeMillis,
-        final long timeoutMillis,
-        final CommunicationMode communicationMode,
-        final PullCallback pullCallback
+            final MessageQueue mq,
+            final String subExpression,
+            final String expressionType,
+            final long subVersion,
+            final long offset,
+            final int maxNums,
+            final int maxSizeInBytes,
+            final int sysFlag,
+            final long commitOffset,
+            final long brokerSuspendMaxTimeMillis,
+            final long timeoutMillis,
+            final CommunicationMode communicationMode,
+            final PullCallback pullCallback
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+        // 查找订阅的Broker地址
         FindBrokerResult findBrokerResult =
-            this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq),
-                this.recalculatePullFromWhichNode(mq), false);
+                this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq),
+                        this.recalculatePullFromWhichNode(mq), false);
+
+        // 如果找不到Broker地址，则更新Topic路由信息并重新查找
         if (null == findBrokerResult) {
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(mq.getTopic());
             findBrokerResult =
-                this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq),
-                    this.recalculatePullFromWhichNode(mq), false);
+                    this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq),
+                            this.recalculatePullFromWhichNode(mq), false);
         }
 
-
+        // 如果找到Broker地址
         if (findBrokerResult != null) {
-            {
-                // check version
-                if (!ExpressionType.isTagType(expressionType)
+            // 检查Broker版本是否支持订阅表达式
+            if (!ExpressionType.isTagType(expressionType)
                     && findBrokerResult.getBrokerVersion() < MQVersion.Version.V4_1_0_SNAPSHOT.ordinal()) {
-                    throw new MQClientException("The broker[" + mq.getBrokerName() + ", "
+                throw new MQClientException("The broker[" + mq.getBrokerName() + ", "
                         + findBrokerResult.getBrokerVersion() + "] does not upgrade to support for filter message by " + expressionType, null);
-                }
             }
+
             int sysFlagInner = sysFlag;
 
+            // 如果Broker是从节点，则清除提交偏移量标志
             if (findBrokerResult.isSlave()) {
                 sysFlagInner = PullSysFlag.clearCommitOffsetFlag(sysFlagInner);
             }
 
+            // 构建拉取消息请求头部
             PullMessageRequestHeader requestHeader = new PullMessageRequestHeader();
             requestHeader.setConsumerGroup(this.consumerGroup);
             requestHeader.setTopic(mq.getTopic());
@@ -234,18 +262,21 @@ public class PullAPIWrapper {
             requestHeader.setBrokerName(mq.getBrokerName());
 
             String brokerAddr = findBrokerResult.getBrokerAddr();
+
+            // 如果消息过滤模式为类过滤
             if (PullSysFlag.hasClassFilterFlag(sysFlagInner)) {
+                // 依据topic名称和broker地址找到注册在broker上的filterServer地址
                 brokerAddr = computePullFromWhichFilterServer(mq.getTopic(), brokerAddr);
             }
 
-            PullResult pullResult = this.mQClientFactory.getMQClientAPIImpl().pullMessage(
-                brokerAddr,
-                requestHeader,
-                timeoutMillis,
-                communicationMode,
-                pullCallback);
+            // 调用MQClientAPIImpl执行拉取消息操作
 
-            return pullResult;
+            return this.mQClientFactory.getMQClientAPIImpl().pullMessage(
+                    brokerAddr,
+                    requestHeader,
+                    timeoutMillis,
+                    communicationMode,
+                    pullCallback);
         }
 
         throw new MQClientException("The broker[" + mq.getBrokerName() + "] not exist", null);

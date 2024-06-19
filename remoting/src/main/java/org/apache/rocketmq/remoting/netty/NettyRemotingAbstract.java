@@ -511,58 +511,74 @@ public abstract class NettyRemotingAbstract {
     }
 
     protected CompletableFuture<ResponseFuture> invoke0(final Channel channel, final RemotingCommand request,
-        final long timeoutMillis) {
+                                                        final long timeoutMillis) {
+        // 创建一个CompletableFuture用于异步处理结果
         CompletableFuture<ResponseFuture> future = new CompletableFuture<>();
+        // 记录开始时间
         long beginStartTime = System.currentTimeMillis();
+        // 获取请求的opaque值
         final int opaque = request.getOpaque();
 
+        // 尝试获取异步信号量
         boolean acquired;
         try {
             acquired = this.semaphoreAsync.tryAcquire(timeoutMillis, TimeUnit.MILLISECONDS);
         } catch (Throwable t) {
+            // 异常处理：信号量获取失败，直接完成异常的CompletableFuture
             future.completeExceptionally(t);
             return future;
         }
         if (acquired) {
+            // 信号量获取成功，进入处理流程
+            // 创建一个SemaphoreReleaseOnlyOnce对象，确保信号量只释放一次
             final SemaphoreReleaseOnlyOnce once = new SemaphoreReleaseOnlyOnce(this.semaphoreAsync);
             long costTime = System.currentTimeMillis() - beginStartTime;
             if (timeoutMillis < costTime) {
+                // 检查是否超时，如果超时，释放信号量并完成超时异常的CompletableFuture
                 once.release();
                 future.completeExceptionally(new RemotingTimeoutException("invokeAsyncImpl call timeout"));
                 return future;
             }
 
+            // 创建ResponseFuture对象，并设置回调
             AtomicReference<ResponseFuture> responseFutureReference = new AtomicReference<>();
             final ResponseFuture responseFuture = new ResponseFuture(channel, opaque, request, timeoutMillis - costTime,
-                new InvokeCallback() {
-                    @Override
-                    public void operationComplete(ResponseFuture responseFuture) {
+                    new InvokeCallback() {
+                        @Override
+                        public void operationComplete(ResponseFuture responseFuture) {
+                            // 操作完成时的回调，这里不需要额外处理
+                        }
 
-                    }
+                        @Override
+                        public void operationSucceed(RemotingCommand response) {
+                            // 操作成功时的回调，完成future并传递ResponseFuture对象
+                            future.complete(responseFutureReference.get());
+                        }
 
-                    @Override
-                    public void operationSucceed(RemotingCommand response) {
-                        future.complete(responseFutureReference.get());
-                    }
-
-                    @Override
-                    public void operationFail(Throwable throwable) {
-                        future.completeExceptionally(throwable);
-                    }
-                }, once);
+                        @Override
+                        public void operationFail(Throwable throwable) {
+                            // 操作失败时的回调，完成future并传递异常
+                            future.completeExceptionally(throwable);
+                        }
+                    }, once);
+            // 将ResponseFuture对象添加到responseTable中
             responseFutureReference.set(responseFuture);
             this.responseTable.put(opaque, responseFuture);
             try {
+                // 将请求写入Channel并刷新，设置监听器处理结果
                 channel.writeAndFlush(request).addListener((ChannelFutureListener) f -> {
                     if (f.isSuccess()) {
+                        // 如果写入成功，标记发送请求成功
                         responseFuture.setSendRequestOK(true);
                         return;
                     }
+                    // 如果写入失败，处理异常并记录日志
                     requestFail(opaque);
                     log.warn("send a request command to channel <{}> failed.", RemotingHelper.parseChannelRemoteAddr(channel));
                 });
                 return future;
             } catch (Exception e) {
+                // 发送请求过程中发生异常，移除ResponseFuture并释放资源，记录异常日志，并完成异常的CompletableFuture
                 responseTable.remove(opaque);
                 responseFuture.release();
                 log.warn("send a request command to channel <" + RemotingHelper.parseChannelRemoteAddr(channel) + "> Exception", e);
@@ -570,15 +586,18 @@ public abstract class NettyRemotingAbstract {
                 return future;
             }
         } else {
+            // 信号量获取失败，根据超时时间进行处理
             if (timeoutMillis <= 0) {
+                // 如果超时时间小于等于0，完成异常的CompletableFuture，表示请求过于频繁
                 future.completeExceptionally(new RemotingTooMuchRequestException("invokeAsyncImpl invoke too fast"));
             } else {
+                // 如果超时时间大于0，表示等待超时，记录日志并完成异常的CompletableFuture
                 String info =
-                    String.format("invokeAsyncImpl tryAcquire semaphore timeout, %dms, waiting thread nums: %d semaphoreAsyncValue: %d",
-                        timeoutMillis,
-                        this.semaphoreAsync.getQueueLength(),
-                        this.semaphoreAsync.availablePermits()
-                    );
+                        String.format("invokeAsyncImpl tryAcquire semaphore timeout, %dms, waiting thread nums: %d semaphoreAsyncValue: %d",
+                                timeoutMillis,
+                                this.semaphoreAsync.getQueueLength(),
+                                this.semaphoreAsync.availablePermits()
+                        );
                 log.warn(info);
                 future.completeExceptionally(new RemotingTimeoutException(info));
             }

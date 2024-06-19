@@ -917,17 +917,17 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     /**
      * 发送消息的实现方法。根据不同的通信模式（同步、异步、单向），调用不同的发送方法，并根据超时时间判断是否超时。
      *
-     * @param msg                要发送的消息。
-     * @param mq                 消息队列。
-     * @param communicationMode  通信模式（同步、异步、单向）。
-     * @param sendCallback       发送结果回调。
-     * @param topicPublishInfo   主题发布信息。
-     * @param timeout            发送超时时间。
-     * @return 发送结果。
-     * @throws MQClientException   发送消息时客户端异常。
-     * @throws RemotingException   远程通信异常。
-     * @throws MQBrokerException  MQ Broker 异常。
-     * @throws InterruptedException  线程中断异常。
+     * @param msg                要发送的消息
+     * @param mq                 要发送的目的消息队列
+     * @param communicationMode  通信模式（同步、异步、单向）
+     * @param sendCallback       异步结果回调函数
+     * @param topicPublishInfo   topic路由信息
+     * @param timeout            发送超时时间
+     * @return 发送结果
+     * @throws MQClientException   发送消息时客户端异常
+     * @throws RemotingException   远程通信异常
+     * @throws MQBrokerException  MQBroker异常
+     * @throws InterruptedException  线程中断异常
      */
     private SendResult sendKernelImpl(final Message msg,
                                       final MessageQueue mq,
@@ -936,13 +936,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                                       final TopicPublishInfo topicPublishInfo,
                                       final long timeout)
             throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        // 记录方法开始时间
+        // 记录开始时间
         long beginStartTime = System.currentTimeMillis();
-        // 获取消息队列所属的 Broker 名称
+        // 获取消息队列所属的Broker名称
         String brokerName = this.mQClientFactory.getBrokerNameFromMessageQueue(mq);
-        // 在 Broker 地址列表中查找对应的 Broker 地址
+        // 获取broker地址
         String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(brokerName);
-        // 若未找到对应的 Broker 地址，则尝试查找主题发布信息并重新获取 Broker 地址
+        // 若本地缓存中没获取到，则从nameserver中refresh缓存
         if (null == brokerAddr) {
             tryToFindTopicPublishInfo(mq.getTopic());
             brokerName = this.mQClientFactory.getBrokerNameFromMessageQueue(mq);
@@ -951,9 +951,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // 上下文信息对象
         SendMessageContext context = null;
-        // 若找到了 Broker 地址
+        // 找到了Broker地址
         if (brokerAddr != null) {
-            // 对 VIP 通道进行处理
+            // 对VIP通道进行处理
             brokerAddr = MixAll.brokerVIPChannel(this.defaultMQProducer.isSendMessageWithVIPChannel(), brokerAddr);
 
             // 备份消息体
@@ -971,10 +971,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     topicWithNamespace = true;
                 }
 
-                // 消息系统标志
                 int sysFlag = 0;
                 boolean msgBodyCompressed = false;
-                // 尝试对消息进行压缩
+                // 对消息进行压缩
                 if (this.tryToCompressMessage(msg)) {
                     sysFlag |= MessageSysFlag.COMPRESSED_FLAG;
                     sysFlag |= compressType.getCompressionFlag();
@@ -1130,13 +1129,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
                 throw e;
             } finally {
-                // 恢复消息体和主题
+                // 恢复消息体和主题，防止压缩后导致消息被覆盖成压缩后的消息
                 msg.setBody(prevBody);
                 msg.setTopic(NamespaceUtil.withoutNamespace(msg.getTopic(), this.defaultMQProducer.getNamespace()));
             }
         }
 
-        // 若未找到对应的 Broker 地址，则抛出 MQClientException 异常
         throw new MQClientException("The broker[" + brokerName + "] not exist", null);
     }
 
