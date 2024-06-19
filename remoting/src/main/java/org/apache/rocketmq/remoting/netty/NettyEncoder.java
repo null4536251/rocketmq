@@ -30,6 +30,7 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 public class NettyEncoder extends MessageToByteEncoder<RemotingCommand> {
     private static final Logger log = LoggerFactory.getLogger(LoggerName.ROCKETMQ_REMOTING_NAME);
 
+    // 4个字节填充物 + 4字节总长度 + 1字节协议类型  + 3字节消息头长度 + 消息头 + 消息体
     @Override
     public void encode(ChannelHandlerContext ctx, RemotingCommand remotingCommand, ByteBuf out)
         throws Exception {

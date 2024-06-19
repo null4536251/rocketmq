@@ -186,15 +186,19 @@ public class RemotingCommand {
     }
 
     public static RemotingCommand decode(final ByteBuf byteBuffer) throws RemotingCommandException {
+        // 获取可读字节数
         int length = byteBuffer.readableBytes();
+        // header长度4个字节32位
         int oriHeaderLen = byteBuffer.readInt();
+        // 取oriHeaderLen低24位，前8位没有实际意义，只是为了凑2的整数幂（32）
         int headerLength = getHeaderLength(oriHeaderLen);
         if (headerLength > length - 4) {
+            //todo-tzx 22480 2024/6/19 22:39 什么情况会走到这里？
             throw new RemotingCommandException("decode error, bad header length: " + headerLength);
         }
-
+        // 解码header
         RemotingCommand cmd = headerDecode(byteBuffer, headerLength, getProtocolType(oriHeaderLen));
-
+        // 解码body
         int bodyLength = length - 4 - headerLength;
         byte[] bodyData = null;
         if (bodyLength > 0) {
@@ -206,6 +210,8 @@ public class RemotingCommand {
         return cmd;
     }
 
+    // 提取低24位
+    // 0xFFFFF : 00000000 11111111 11111111 11111111
     public static int getHeaderLength(int length) {
         return length & 0xFFFFFF;
     }
@@ -230,6 +236,9 @@ public class RemotingCommand {
         return null;
     }
 
+    // source >> 24 将 source的高八位移到低八位（高24位置0）
+    // 0xFF: 00000000 00000000 00000000 11111111
+    // 结果：取source（int）低八位转为SerializeType（byte)
     public static SerializeType getProtocolType(int source) {
         return SerializeType.valueOf((byte) ((source >> 24) & 0xFF));
     }
@@ -454,8 +463,10 @@ public class RemotingCommand {
 
     public void fastEncodeHeader(ByteBuf out) {
         int bodySize = this.body != null ? this.body.length : 0;
+        // 拿到起始写位置
         int beginIndex = out.writerIndex();
         // skip 8 bytes
+        // 为了凑齐2的整数幂（32位）
         out.writeLong(0);
         int headerSize;
         if (SerializeType.ROCKETMQ == serializeTypeCurrentRPC) {
@@ -469,7 +480,9 @@ public class RemotingCommand {
             headerSize = header.length;
             out.writeBytes(header);
         }
+        // 写入整个消息的长度，4为消息长度本身占用的长度
         out.setInt(beginIndex, 4 + headerSize + bodySize);
+        // 跳过上一步设置的消息长度所占的4个字节，设置协议类型以及消息头长度（第一个字节为序列化类型，后面三个是消息头长度）
         out.setInt(beginIndex + 4, markProtocolType(headerSize, serializeTypeCurrentRPC));
     }
 
